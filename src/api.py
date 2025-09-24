@@ -3,34 +3,65 @@ import aiohttp
 import asyncio
 from contextlib import asynccontextmanager
 import json
+import threading
 
 urls = []
+urls_lock = threading.Lock()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
     Loads list of URLs from config file when API is started.
     """
-    urls.clear()
-    try:
-        with open('config.json', 'r') as config_file:
-            config = json.load(config_file)
-        for source in config["sources"]:
-            if source["enabled"] == True:
-                urls.append(source["url"])
-        # urls.extend([source["url"] for source in config["sources"]])
-    except Exception:
-        pass
+    with urls_lock:
+        urls.clear()
+        try:
+            with open('config.json', 'r') as config_file:
+                config = json.load(config_file)
+            for source in config["sources"]:
+                if source["enabled"] == True:
+                    urls.append(source["url"])
+        except Exception:
+            pass
     yield
 
 app = FastAPI(debug=True, lifespan=lifespan)
+
+@app.post("/add_url")
+async def add_url(request: Request):
+    """
+    Adds a URL to the list of active APIs.
+    """
+    data = await request.json()
+    url = data.get("url")
+    if url:
+        with urls_lock:
+            if url not in urls:
+                urls.append(url)
+        return {"message": "URL added successfully."}
+    return {"message": "Invalid request."}
+
+@app.post("/remove_url")
+async def remove_url(request: Request):
+    """
+    Removes a URL from the list of active APIs.
+    """
+    data = await request.json()
+    url = data.get("url")
+    if url:
+        with urls_lock:
+            if url in urls:
+                urls.remove(url)
+        return {"message": "URL removed successfully."}
+    return {"message": "Invalid request."}
 
 @app.get("/cubelify")
 async def cubelify_endpoint(id: str, name: str, sources: str, request: Request):
     """
     Handles requests from cubelify.
     """
-    formatted_urls = [format_url(url=url, id=id, name=name, sources=sources) for url in urls]
+    with urls_lock:
+        formatted_urls = [format_url(url=url, id=id, name=name, sources=sources) for url in urls]
     headers = dict(request.headers)
     headers.pop('accept-encoding', None)
     headers.pop('host', None)

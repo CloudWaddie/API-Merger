@@ -1,0 +1,68 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Build executable
+      run: pyinstaller build.spec
+
+    - name: Determine Asset Name and Path
+      id: asset_info
+      run: |
+        if [ "${{ runner.os }}" == "Linux" ]; then
+          echo "ASSET_NAME=API-Merger-linux" >> $GITHUB_ENV
+          echo "ASSET_PATH=./dist/API Merger" >> $GITHUB_ENV
+        elif [ "${{ runner.os }}" == "Windows" ]; then
+          echo "ASSET_NAME=API-Merger-windows.exe" >> $GITHUB_ENV
+          echo "ASSET_PATH=./dist/API Merger.exe" >> $GITHUB_ENV
+        elif [ "${{ runner.os }}" == "macOS" ]; then
+          echo "ASSET_NAME=API-Merger-macos" >> $GITHUB_ENV
+          echo "ASSET_PATH=./dist/API Merger.app" >> $GITHUB_ENV
+        fi
+      shell: bash
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      if: matrix.os == 'ubuntu-latest' # Only create release once
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.run_number }}
+        release_name: Release ${{ github.run_number }}
+        draft: false
+        prerelease: false
+
+    - name: Upload Release Asset
+      id: upload-release-asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ${{ env.ASSET_PATH }}
+        asset_name: ${{ env.ASSET_NAME }}
+        asset_content_type: application/octet-stream
