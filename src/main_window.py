@@ -1,7 +1,15 @@
 import json
-from PyQt5.QtWidgets import QMainWindow, QListView, QPushButton, QMenu, QInputDialog, QMessageBox
+import sys
+import os
+from pathlib import Path
+import requests
+from PyQt5.QtWidgets import QMainWindow, QListView, QPushButton, QMenu, QInputDialog, QMessageBox, QSystemTrayIcon, QAction, QApplication
 from PyQt5.QtCore import Qt, QAbstractListModel
+from PyQt5.QtGui import QIcon
 from .api_handler import API_Handler
+from .settings_window import Settings_Window
+if sys.platform == "win32":
+    import winreg
 
 
 class Main_Window(QMainWindow):
@@ -49,6 +57,144 @@ class Main_Window(QMainWindow):
         self.edit_button.setEnabled(False)
         self.edit_button.setGeometry(340, 160, 100, 30)
         self.edit_button.clicked.connect(self.edit)
+
+        menu_bar = self.menuBar()
+        settings_menu = menu_bar.addMenu("Settings")
+        open_settings_action = settings_menu.addAction("Open Settings")
+        open_settings_action.triggered.connect(self.open_settings)
+
+        self.tray_icon = QSystemTrayIcon(self)
+        # The icon file needs to be in the same directory as the script, or you can provide an absolute path.
+        # This is a placeholder icon, and you should replace it with your own.
+        self.tray_icon.setIcon(QIcon("icon.ico"))
+        self.tray_icon.setToolTip("API Merger")
+
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("Show/Hide")
+        show_action.triggered.connect(self.toggle_visibility)
+        quit_action = tray_menu.addAction("Quit")
+        quit_action.triggered.connect(self.quit_application)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.activated.connect(self.tray_icon_activated)
+
+        self.tray_icon.show()
+
+        self.set_autostart()
+
+    def set_autostart(self):
+        """
+        Sets the application to launch at startup.
+        """
+        try:
+            with open("config.json", 'r') as config_file:
+                config = json.load(config_file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            config = {}
+
+        if config.get("auto_start", False):
+            # For this to work in a packaged application, sys.executable needs to be the path to the executable
+            if sys.platform == "win32":
+                key = winreg.HKEY_CURRENT_USER
+                subkey = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                with winreg.OpenKey(key, subkey, 0, winreg.KEY_SET_VALUE) as registry_key:
+                    winreg.SetValueEx(registry_key, "API Merger", 0, winreg.REG_SZ, sys.executable)
+            elif sys.platform == "darwin":
+                plist_path = Path.home() / "Library/LaunchAgents/com.api-merger.plist"
+                if not plist_path.exists():
+                    plist_path.write_text(f"""
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.api-merger</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>{sys.executable}</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+</dict>
+</plist>
+""")
+            elif sys.platform == "linux":
+                desktop_file_path = Path.home() / ".config/autostart/api-merger.desktop"
+                if not desktop_file_path.exists():
+                    desktop_file_path.write_text(f"""
+[Desktop Entry]
+Type=Application
+Exec={sys.executable}
+Hidden=false
+NoDisplay=false
+Name=API Merger
+Comment=API Merger
+X-GNOME-Autostart-enabled=true
+""")
+        else:
+            if sys.platform == "win32":
+                key = winreg.HKEY_CURRENT_USER
+                subkey = r"Software\Microsoft\Windows\CurrentVersion\Run"
+                with winreg.OpenKey(key, subkey, 0, winreg.KEY_SET_VALUE) as registry_key:
+                    try:
+                        winreg.DeleteValue(registry_key, "API Merger")
+                    except FileNotFoundError:
+                        pass
+            elif sys.platform == "darwin":
+                plist_path = Path.home() / "Library/LaunchAgents/com.api-merger.plist"
+                if plist_path.exists():
+                    plist_path.unlink()
+            elif sys.platform == "linux":
+                desktop_file_path = Path.home() / ".config/autostart/api-merger.desktop"
+                if desktop_file_path.exists():
+                    desktop_file_path.unlink()
+
+    def tray_icon_activated(self, reason):
+        """
+        Handles the tray icon being activated.
+        """
+        if reason == QSystemTrayIcon.Trigger:
+            self.toggle_visibility()
+
+    def toggle_visibility(self):
+        """
+        Toggles the visibility of the main window.
+        """
+        if self.isVisible():
+            self.hide()
+        else:
+            self.show()
+            self.activateWindow()
+
+    def quit_application(self):
+        """
+        Quits the application.
+        """
+        self.api.kill_api()
+        QApplication.quit()
+
+    def open_settings(self):
+        """
+        Opens the settings window.
+        """
+        settings_window = Settings_Window(self)
+        if settings_window.exec_():
+            self.set_autostart()
+
+    def closeEvent(self, event):
+        """
+        Overrides the close event to hide the window to the tray.
+        """
+        try:
+            with open("config.json", 'r') as config_file:
+                config = json.load(config_file)
+        except (FileNotFoundError, json.JSONDecodeError):
+            config = {}
+
+        if config.get("minimize_to_tray", False):
+            event.ignore()
+            self.hide()
+        else:
+            self.quit_application()
 
     def show_context_menu(self, pos):
         """
@@ -174,6 +320,12 @@ class Main_Window(QMainWindow):
             index = selected_indexes[0].row()
             self.api_list_model.sources[index]["enabled"] = False
             self.api_list_model.update()
+            url = self.api_list_model.sources[index]["url"]
+            if self.api.api_process:
+                try:
+                    requests.post("http://127.0.0.1:8000/remove_url", json={"url": url})
+                except requests.exceptions.ConnectionError:
+                    pass # API not running
 
     def enable(self):
         """
@@ -184,6 +336,12 @@ class Main_Window(QMainWindow):
             index = selected_indexes[0].row()
             self.api_list_model.sources[index]["enabled"] = True
             self.api_list_model.update()
+            url = self.api_list_model.sources[index]["url"]
+            if self.api.api_process:
+                try:
+                    requests.post("http://127.0.0.1:8000/add_url", json={"url": url})
+                except requests.exceptions.ConnectionError:
+                    pass # API not running
 
     def update_button_state(self):
         """
@@ -242,7 +400,4 @@ class API_list_model(QAbstractListModel):
         self.layoutChanged.emit()
         self.config["sources"] = self.sources
         with open("config.json", "w") as config_file:
-            json.dump(self.config, config_file)
-        if self.api.api_process:
-            self.api.kill_api()
-            self.api.start_api()
+            json.dump(self.config, config_file, indent=4)
