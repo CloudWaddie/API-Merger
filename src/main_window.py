@@ -3,7 +3,7 @@ import sys
 import os
 from pathlib import Path
 import requests
-from PyQt5.QtWidgets import QMainWindow, QListView, QPushButton, QMenu, QInputDialog, QMessageBox, QSystemTrayIcon, QAction, QApplication
+from PyQt5.QtWidgets import QMainWindow, QListView, QPushButton, QMenu, QInputDialog, QMessageBox, QSystemTrayIcon, QAction, QApplication, QWidget, QVBoxLayout, QHBoxLayout
 from PyQt5.QtCore import Qt, QAbstractListModel
 from PyQt5.QtGui import QIcon
 from .api_handler import API_Handler
@@ -26,37 +26,44 @@ class Main_Window(QMainWindow):
         self.setWindowTitle("API Merger")
         self.setGeometry(100, 100, 560, 200)
 
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        layout = QVBoxLayout(central_widget)
+
         self.api_list_model = API_list_model(self.api)
 
         self.api_list_view = QListView(self)
         self.api_list_view.setModel(self.api_list_model)
-        self.api_list_view.setGeometry(10, 10, 540, 140)
         self.api_list_view.selectionModel().selectionChanged.connect(self.update_button_state)
         self.api_list_view.setContextMenuPolicy(Qt.CustomContextMenu)
         self.api_list_view.customContextMenuRequested.connect(self.show_context_menu)
+        layout.addWidget(self.api_list_view)
+
+        button_layout = QHBoxLayout()
+        layout.addLayout(button_layout)
 
         self.start_button = QPushButton("Start API", self)
-        self.start_button.setGeometry(10, 160, 100, 30)
         self.start_button.clicked.connect(self.start)
+        button_layout.addWidget(self.start_button)
 
         self.stop_button = QPushButton("Stop API", self)
         self.stop_button.setEnabled(False)
-        self.stop_button.setGeometry(120, 160, 100, 30)
         self.stop_button.clicked.connect(self.stop)
+        button_layout.addWidget(self.stop_button)
 
         self.add_button = QPushButton("Add New", self)
-        self.add_button.setGeometry(230, 160, 100, 30)
         self.add_button.clicked.connect(self.add)
-
-        self.delete_button = QPushButton("Delete", self)
-        self.delete_button.setEnabled(False)
-        self.delete_button.setGeometry(450, 160, 100, 30)
-        self.delete_button.clicked.connect(self.delete)
+        button_layout.addWidget(self.add_button)
 
         self.edit_button = QPushButton("Edit", self)
         self.edit_button.setEnabled(False)
-        self.edit_button.setGeometry(340, 160, 100, 30)
         self.edit_button.clicked.connect(self.edit)
+        button_layout.addWidget(self.edit_button)
+
+        self.delete_button = QPushButton("Delete", self)
+        self.delete_button.setEnabled(False)
+        self.delete_button.clicked.connect(self.delete)
+        button_layout.addWidget(self.delete_button)
 
         menu_bar = self.menuBar()
         settings_menu = menu_bar.addMenu("Settings")
